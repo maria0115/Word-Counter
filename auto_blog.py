@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import time
 from datetime import datetime, timedelta
 from google import genai
 from git import Repo
@@ -64,30 +65,53 @@ def generate_blog_content(history):
     history_context = "\n".join(history) if history else "기존 포스팅 없음 (첫 글)"
     
     prompt = f"""
-    당신은 고급 백엔드 개발자이자 기술 블로그 운영자입니다.
-    기존에 작성된 블로그 주제를 확인하고, 내용이 중복되거나 겹치지 않으면서 다음 단계로 깊이 있게 발전할 수 있는 새로운 연계 기술 주제를 하나 선정하여 MDX 형식의 글을 작성해주세요.
-    기존 글의 맥락을 이어받아 심화된 개념이나 다른 측면의 해결책을 다루는 것이 좋습니다.
+    You are an expert Senior Backend Engineer and a prolific tech blogger. 
+    Review the list of previously written blog posts and select a brand new, highly relevant, and deep-dive backend technical topic based on the focus stack.
+    The new topic must connect naturally but avoid any duplication.
+
+    [Focus Tech Stack]: {BLOG_TECH_STACK}
     
-    [관심 기술 스택]: {BLOG_TECH_STACK}
-    
-    [기존 작성된 포스팅 목록]:
+    [Previous Blog Posts]:
     {history_context}
     
-    [요구사항]:
-    1. 제목은 개발자의 호기심을 유발하고 명확해야 하며, 기존 목록에 있는 주제와 절대 겹치지 않아야 합니다.
-    2. MDX Frontmatter(메타데이터)를 상단에 포함해야 합니다. (title, date, tags, description 형식)
-       - date는 오늘 날짜인 '{datetime.now().strftime("%Y-%m-%d")}'로 설정해주세요.
-    3. 본문은 가상의 데이터나 플레이스홀더를 쓰지 말고, 실제 구동 가능한 수준의 구체적인 코드 예시(Java/Spring 등)를 포함하여 작성해주세요.
-    4. 어조는 주니어와 시니어 모두에게 도움되는 '친절하면서도 전문적인 피어(Peer)'의 톤앤매너를 유지하세요.
-    
-    출력은 다른 설명 없이 오직 MDX 파일 내용만 반환하세요.
+    [STRICT REQUIREMENTS]:
+    1. LANGUAGE: The entire post (including title, frontmatter, and body) MUST be written in professional, natural, and fluent English.
+    2. TONE & MANNER: Maintain an engaging, authoritative yet accessible 'Senior-to-Peer' developer tone. Use active voice and clear, concise technical terminology. Avoid sounding like a generic AI or textbook.
+    3. MDX FRONTMATTER: Include the exact frontmatter block at the very top:
+       ---
+       title: "Engaging and clear technical title"
+       date: "{datetime.now().strftime("%Y-%m-%d")}"
+       tags: ["tag1", "tag2"]
+       description: "A punchy, 1-2 sentence summary of what the reader will learn."
+       ---
+    4. STRUCTURE: 
+       - Introduction: Hook the reader by stating a real-world problem or architectural challenge.
+       - Deep Dive / Core Concept: Explain the mechanism/patterns clearly.
+       - Production-Ready Code: Provide fully functional, concrete Java/Spring Boot 4 examples without using lazy placeholders or pseudo-code.
+       - Best Practices / Trade-offs: Discuss performance implications, gotchas, or production considerations.
+       - Conclusion: Wrap up with a brief summary.
+    5. OUTPUT FORMAT: Return ONLY the raw MDX content. Do not include any conversational intros, outros, or markdown code block wrappers (like ```mdx) at the outer level.
     """
 
-    response = client.models.generate_content(
-        model='gemini-2.5-flash',
-        contents=prompt,
-    )
-    return response.text
+    max_retries = 3
+    retry_delay = 5  # 초 단위
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            print(f"🤖 Gemini가 히스토리를 분석하여 다음 연계 주제를 고민하는 중... (시도 {attempt}/{max_retries})")
+            response = client.models.generate_content(
+                model='gemini-2.5-flash',
+                contents=prompt,
+            )
+            return response.text
+        except Exception as e:
+            # 503 에러 등이 발생하면 잡아서 대기 후 재시도
+            if attempt < max_retries:
+                print(f"⚠️ 일시적인 서버 오류 발생: {e}\n⏱️ {retry_delay}초 후 다시 시도합니다...")
+                time.sleep(retry_delay)
+            else:
+                # 최대 재시도 횟수를 넘기면 원래대로 예외 던지기
+                raise e
 
 def save_mdx_file(content):
     """생성된 내용을 mdx 파일로 저장합니다."""
